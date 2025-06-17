@@ -1,39 +1,71 @@
-# LtC
-Dashbaord: https://drsno-ank.github.io/LtC/
+# 🏔️ Khumbu Glacier AWS Data  
+📍 *27.97° N, 86.91° E | Elevation: ~6,685 m asl*
 
-README FILE FOR KHUMBU GLACIER AUTOMATIC WEATHER STATION DATA (27.97° N, 86.91° E, ~6,685 m asl)
+Explore near-real-time half-hourly weather data from one of the world’s highest Automatic Weather Stations (AWS), located on Khumbu Glacier, Nepal.
 
-Half-Hourly Variables
+🔗 **Interactive Dashboard**: [LtC Dashboard](https://drsno-ank.github.io/LtC/)
 
-BattV     : Battery Voltage (Volts)
+---
 
-AirTC 	  : Air Temperature (°C) from HygroVUE10 Digital Temperature & Relative Humidity Sensor
+## 📊 Available Variables
 
-RH        : Relative Humidity (%) from HygroVUE10 Digital Temperature & Relative Humidity Sensor
+| Variable     | Description                                                                 |
+|--------------|-----------------------------------------------------------------------------|
+| `BattV`      | Battery Voltage *(Volts)*                                                   |
+| `AirTC`      | Air Temperature *(°C)* from **HygroVUE10**                                   |
+| `RH`         | Relative Humidity *(%)* from **HygroVUE10**                                  |
+| `SnowDepth`  | Snow Depth *(m)* from **SnowVUE10**                                          |
+| `SWin`       | Incoming Shortwave Radiation *(µmol/s/m²)* from **CS310 Quantum Sensor**     |
+| `LWin`       | Incoming Longwave Radiation *(W/m²)* from **SL-510 Pyrgeometer**             |
+| `LWout`      | Outgoing Longwave Radiation *(W/m²)* from **SL-610 Pyrgeometer**             |
 
-SnowDepth : Snow Depth Measurement (m) from SnowVUE10 Digital Snow Depth Sensor
+---
 
-SWin      : Incoming Shortwave Radiation (µmol/s/m²) from CS310 Quantum Sensor
+## 🧪 Measurement Types
 
-LWin      : Incoming Longwave Radiation (W/m²) from Apogee Instruments SL-510 Thermopile Pyrgeometers
+Each variable (except where noted) includes the following statistics:
 
-LWout     : Outgoing Longwave Radiation (W/m²) from Apogee Instruments SL-610 Thermopile Pyrgeometers
+- **Average**
+- **Minimum**
+- **Maximum**
+- **Sample** *(only for RH)*
 
+---
 
-MEASUREMENT TYPES: For each variable, the following measurements are typically recorded:
-Average
-Minimum
-Maximum
-Sample (RH)
+## ⚠️ Missing Data
 
-MISSING VALUES
-Missing values are denoted by -999.
+- Missing or invalid readings are flagged with `-999`.
 
+---
 
-IMPORTANT CONSIDERATIONS
-Verify data quality before extensive analysis.
-Cross-reference with other local measurements when possible.
-Be aware of potential sensor limitations and calibration issues.
+## 🔍 Data Usage Notes
 
-CONTACT INFORMATION
-For further details about the data collection, sensor specifications, or usage guidelines, please contact the original data collection team- Duncan Quincey (d.j.quincey@leeds.ac.uk).
+- ✅ **Always validate data quality** before use.
+- 🔁 **Cross-reference** with nearby AWS stations for consistency.
+- 🛠️ Sensor readings may be influenced by **calibration drift**, **environmental extremes**, or **physical obstructions**.
+
+---
+
+## 🧭 About the Site
+
+This high-altitude AWS sits within the **Khumbu Glacier system**, offering rare insights into weather conditions near the "Death Zone." The dataset is ideal for studying:
+
+- High-mountain meteorology
+- Glacier-atmosphere interaction
+- Snow accumulation patterns
+- Energy balance modeling
+
+---
+
+## 📬 Contact
+
+For technical details, data queries, or sensor specifications, reach out to:
+
+**Dr. Duncan Quincey**  
+School of Geography, University of Leeds  
+📧 d.j.quincey@leeds.ac.uk
+
+---
+
+> *This repository is part of the “[Losing their Cool (LtC)](https://gtr.ukri.org/projects?ref=NE%2FZ000033%2F1)” climate research initiative.*
+
