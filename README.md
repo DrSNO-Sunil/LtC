@@ -6,8 +6,9 @@ README FILE FOR KHUMBU GLACIER AUTOMATIC WEATHER STATION DATA (27.97° N, 86.91�
 Half-Hourly Variables
 
 BattV     : Battery Voltage (Volts)
-
 AirTC 	  : Air Temperature (°C) from HygroVUE10 Digital Temperature & Relative Humidity Sensor
+
+
 RH        : Relative Humidity (%) from HygroVUE10 Digital Temperature & Relative Humidity Sensor
 SnowDepth : Snow Depth Measurement (m) from SnowVUE10 Digital Snow Depth Sensor
 SWin      : Incoming Shortwave Radiation (µmol/s/m²) from CS310 Quantum Sensor
