@@ -19,6 +19,7 @@ LWin      : Incoming Longwave Radiation (W/m²) from Apogee Instruments SL-510 T
 
 LWout     : Outgoing Longwave Radiation (W/m²) from Apogee Instruments SL-610 Thermopile Pyrgeometers
 
+
 MEASUREMENT TYPES: For each variable, the following measurements are typically recorded:
 Average
 Minimum
@@ -27,6 +28,7 @@ Sample (RH)
 
 MISSING VALUES
 Missing values are denoted by -999.
+
 
 IMPORTANT CONSIDERATIONS
 Verify data quality before extensive analysis.
