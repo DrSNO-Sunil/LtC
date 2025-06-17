@@ -1,4 +1,4 @@
-# 🏔️ Khumbu Glacier AWS Data  
+# 🏔️ AWS Data from the Western Cwm of Mount Everest, located on the Khumbu Glacier  
 📍 *27.97° N, 86.91° E | Elevation: ~6,685 m asl*
 
 Explore near-real-time half-hourly weather data from one of the world’s highest Automatic Weather Stations (AWS), located on Khumbu Glacier, Nepal.
