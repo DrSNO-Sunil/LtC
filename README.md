@@ -52,8 +52,7 @@ This high-altitude AWS sits within the **Khumbu Glacier system**, offering rare 
 
 - High-mountain meteorology
 - Glacier-atmosphere interaction
-- Snow accumulation patterns
-- Energy balance modeling
+- Glacio-hydrological modeling
 
 ---
 
