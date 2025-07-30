@@ -32,12 +32,6 @@ Each variable (except where noted) includes the following statistics:
 
 ---
 
-## ⚠️ Missing Data
-
-- Missing or invalid readings are flagged with `-999`.
-
----
-
 ## 🔍 Data Usage Notes
 
 - ✅ **Always validate data quality** before use.
