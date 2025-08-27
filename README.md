@@ -3,7 +3,7 @@
 
 Explore near-real-time half-hourly weather data from one of the world’s highest Automatic Weather Stations (AWS), located on Khumbu Glacier, Nepal.
 
-🔗 **Interactive Dashboard**: [LtC Dashboard](https://DrSNO-Sunil.github.io/LtC/)
+🔗 **Interactive Dashboard**: [LtC Dashboard](https://drsno-sunil.github.io/LtC/)
 
 ---
 
