@@ -1,0 +1,364 @@
+'CR1000X Series Datalogger
+'Date: 14/03/2025
+'Program author: Matt Peacey
+'Adapted from: "Termistors_15_V8 and Khumbu_Glacier_AWS_10032025
+'Thermistor Strings: Alpha, Echo, Foxtrot, Golf
+
+'Declare data storage strings for communication, parsing and handling
+Public DataString As String *25000 'String limit based on the available memory size in the logger
+Public RawString As String *25000  'String limit based on the available memory size in the logger
+
+Public ReadyString As String *200
+Public ResponseString As String *200
+Public MessageString As String *200
+Public ReplyString As String *200
+Public MessageID As String *100
+Public ReplyStringState As String *100
+Public ReadyCheck As String *100
+Public CancelCheck As String *100
+Public CancelMessage As String *100
+
+'Declare variables for string parsing and timing as integer
+Public SecondDel, FirstDel As Long
+
+'Declare vcariables for flags
+Public MiniStatus As Boolean
+Public SendFail As Boolean
+
+'Declare Public Variables
+Public PTemp        ' Panel temperature (deg C)
+Public Batt_volt    ' Panel battery voltage (V)
+Public X(15)        ' 1/2 bridge voltage ratio [15 records per execution]
+Public Rf(15)		    ' Reference resistor resistance [Ohms]
+Public Rt(15)		    ' Thermistor resistance [Ohms]
+Public D(15)		    ' Calibration offset from ice bath [deg C]
+Public T(15)        ' Temperature [deg C]
+
+'Declare private variable
+Dim I                'Used to loop instructions for 1/2 bridge to temperature calculations
+
+'Records 1-12 are from 16-core cable; records 13-15 are from three floating 2-core cables**
+
+Units PTemp = Deg C
+Units Batt_volt = V
+Units X = mV/mV
+Units Rf = Ohms
+Units Rt = Ohms
+Units D = Deg C
+Units T = Deg C
+
+'Declare Constants
+'Steinhart & Hart (1968) polynomial coefficients for PR502J2 thermistors
+'Curve fitting was performed over the temperature range -30 to + 25 deg C
+Const A = 0.001286097908655
+Const B = 0.000235957064338
+Const C = 0.000000093940540
+
+'Define Data Tables
+DataTable (Half_Hourly,True,-1)                 'Name table 'Half Hourly' and set size to # of reords or autoallocate (-1)
+  DataInterval (0,30,Min,10)              'Set output flag high (30) when (0) secs into (30) Min  period
+  Average (1, Batt_volt, FP2, False)          ' Record (Average) panel battery voltage as variable-precision floating point (2 bytes per value)
+  Average (1,PTemp,FP2, False)                'Record (Average) panel temperature as variable-precision floating point (2 bytes per value)
+  Average (15,X,IEEE4, False)                 'Record (Average) 1/2 bridge voltage ratio (15 times) as IEEE4 (4 bytes per value)
+  Average (15,T,IEEE4, False)                 'Record (Average) thermistor temperature (15 times) as IEEE4 (4 bytes per value)
+EndTable
+
+DataTable (Card_1_Min,True,-1)                   'Set table size to # of records, or -1 to autoallocate.
+  DataInterval (0,1,Min,10)                  'Set output flag high (1) when (0) secs into (1) Min  period
+  CardOut(1,-1000)                             'save data to card
+  Minimum (1,Batt_volt,FP2,False,False)      ' Record (Minimum) panel battery voltage as variable-precision floating point (2 bytes per value)
+  Sample (1,PTemp,FP2)                       'Record (Sample) panel temperature as variable-precision floating point (2 bytes per value)
+  Sample (15,X,IEEE4)                        'Record (Sample) 1/2 bridge voltage ratio (15 times) as IEEE4 (4 bytes per value)
+  Sample(15,T,IEEE4)                         'Record (Sample) thermistor temperature (15 times) as IEEE4 (4 bytes per value)
+EndTable
+
+'--- Subroutines ---
+'Subroutine to send data
+Sub SendDataString()
+  PortSet(C1, 1)
+  MiniStatus = True
+  SerialFlush(ComC3) 'Clear any characters in the serial input buffer
+
+  ReadyString = "AT+IMTWU=" & Len(DataString) & CHR(13) & CHR(10) 'Prepare AT command for sending binary data of length DataString
+
+  Delay(1, 500, mSec)
+  SerialOut(ComC3, ReadyString, "", 0, 0)                          'Check if Mini is Ready to recive binary data
+
+  ReadyCheck = ""
+  Delay(1, 500, mSec)
+  SerialIn(ReadyCheck,ComC3, 3000, "", 1000)                      'Read response
+
+  Delay(1, 500, mSec)
+  SerialOut(ComC3, DataString, "", 0, 0)                           'Send main data: DataString
+
+  'clear variables
+  ResponseString = ""
+  MessageID = ""
+  MessageString = ""
+
+  'read messageid string
+  Delay(1, 500, mSec)
+  SerialIn(ResponseString,ComC3, 100, "", 1000)                    'Read response from serial (DataString)
+
+  'Parse message ID from response string (example ResponseString = "+IMTWU: 12 OK" so MessageID = 12)
+  FirstDel = InStr(1, ResponseString, " ", 2)+1
+  If FirstDel = Len(ResponseString)+1 OR NOT(Mid(ResponseString,FirstDel,1) >= CHR(48) AND Mid(ResponseString,FirstDel,1) <= CHR(57)) Then
+    FirstDel = 1
+  EndIf
+  SecondDel = InStr(FirstDel, ResponseString, "O", 2)
+  If SecondDel = 0 Then
+    SecondDel = Len(ResponseString)+1
+  EndIf
+
+  'Extract message ID
+  MessageID = Mid(ResponseString, FirstDel, ABS(SecondDel-FirstDel))
+
+  'Prepare messagestring for tracking the message state
+  MessageString = "AT+IMTMOS=" & MessageID & CHR(13)& CHR(10)
+EndSub
+
+'Subroutine to check communication status
+Sub CheckStatus()
+  PortSet(C1, 1)
+  MiniStatus = True
+  'clear variables
+  ReplyString = ""
+  ReplyStringState = ""
+
+  SerialFlush(ComC3)
+  Delay(1, 500, mSec)
+
+  'send messagestring
+  SerialOut(ComC3, MessageString, "", 0, 0)
+
+  'read status string
+  Delay(1, 500, mSec)
+  SerialIn(ReplyString,ComC3, 100, "", 1000)
+
+  'Parse reply for the status string (example ReplyString = "+IMTMOS: 244, 5, 0, OK" so ReplyStringState = 5)
+  FirstDel = InStr(1, ReplyString, ",", 2)+1
+  If FirstDel = Len(ReplyString)+1 OR NOT(Mid(ReplyString,FirstDel+1,1) = "," OR Mid(ReplyString,FirstDel+1,1) = "") Then
+    FirstDel = 1
+  EndIf
+  SecondDel = InStr(FirstDel, ReplyString, ",", 2)
+  If SecondDel = 0 Then
+    SecondDel = Len(ReplyString)+1
+  EndIf
+
+  'Extract reply state
+  ReplyStringState = Mid(ReplyString, FirstDel, ABS(SecondDel-FirstDel))
+EndSub
+
+'Subroutine to turn OFF the port
+Sub MiniSleep()
+  PortSet(C1, 0)
+  MiniStatus = False
+  SendFail = False
+  DataString = ""                                              'Clear DataString once send successfful
+EndSub
+
+'Subroutine to retry if Send fail
+Sub HandleRetryAttempt()
+  Call CheckStatus()                                           'Call Subroutine for staus check data send or not
+  If ReplyStringState = "5" Then
+    Call MiniSleep()                                           'Call Subroutine for Port Off
+  Else
+    SerialFlush(ComC3)
+
+    CancelMessage = "AT+IMTC3=" & MessageID & CHR(13) & CHR(10) 'Cancel MO - A message sent from the device to the Iridium network
+    SerialOut(ComC3, CancelMessage, "", 0, 0)
+
+    Delay(1, 500, mSec)
+    SerialIn(CancelCheck,ComC3, 3000, "", 1000)                 'Read response
+
+    Call SendDataString()                                       'Call Subroutine for Send data
+
+    Delay(1, 1, Min)
+    Call CheckStatus()                                          'Call Subroutine for staus check data send or not
+    If ReplyStringState = "5" Then
+      Call MiniSleep()                                          'Call Subroutine for Port Off
+    EndIf
+  EndIf
+EndSub
+'--- End Subroutines ---
+
+'Main Program
+BeginProg
+
+  ' Configure COMPort C3 for sending data
+  SerialOpen(ComC3, 115200,0,0,512)
+
+  'Reference resistor value Rf [Ohms]
+  Rf(1) = 22011
+  Rf(2) = 22002
+  Rf(3) = 22009
+  Rf(4) = 22011
+  Rf(5) = 22011
+  Rf(6) = 22011
+  Rf(7) = 22011
+  Rf(8) = 22011
+  Rf(9) = 22011
+  Rf(10) = 22011
+  Rf(11) = 22011
+  Rf(12) = 22011
+  Rf(13) = 22011
+  Rf(14) = 22011
+  Rf(15) = 22011
+
+  'Zero point offset D [Celcius]
+  'This is the difference from zero and must be added to the recorded temperature (i.e. negative values subtracted)
+  'D(1-12): Cable Alpha, D(13): Cable Echo, D(14): Cable Foxtrot, D(15): Cable Golf
+  '**Needs changing with any new curve fitting from calibration**
+  D(1) = 0.021858            'Alpha
+  D(2) = 0.046972            'Alpha
+  D(3) = -0.04577            'Alpha
+  D(4) = -0.04687            'Alpha
+  D(5) = 0.052581            'Alpha
+  D(6) = 0.059826            'Alpha
+  D(7) = 0.063732            'Alpha
+  D(8) = 0.068095            'Alpha
+  D(9) = -0.02733            'Alpha
+  D(10) = 0.101119           'Alpha
+  D(11) = 0.002403           'Alpha
+  D(12) = 0.096448           'Alpha
+  D(13) = 0.147995           'Echo
+  D(14) = 0.141955           'Foxtrot
+  D(15) = 0.102701           'Golf
+
+  'Scan
+  Scan (1,Min,0,0)                                                'Scan each 1 (1) Mins (Min) with no buffering (0) looping (0) until ExitScan instructed
+    PanelTemp (PTemp,60)                                            'Measure panel temperature (PTemp)with 60 Hz low pass filter (60)
+    Battery (Batt_volt)                                            'Measure supply voltage (Batt_volt)
+
+    'Measure thermistors
+    BrHalf(X(1),1,mV5000,1,Vx1,1,2500,True,2000,250,1,0)             'Measure half-bridge voltage ratio Rt/Rf of thermistor 1 (X(1)), with one repitition (1),
+    'over 5,000 millivolt range (mV5000) at single-ended input channel 1 (1), using
+    'excitation channel 1 (Vx1), exciting one bridge at a time (1), with an excitation voltage
+    'of 2,500 mV (2500), then reverse excitation and make a second measurement (True), each with a
+    '2000 microseconds settling time (2000), with a 250 Hz low pass filter, a miltiplier of 1 (1)
+    'and offset of 0 (0)
+    BrHalf(X(2),1,mV5000,2,Vx1,1,2500,True,2000,250,1,0)              'Same as above except for thermistor 2 (X2), wired into input channel 2 (2)
+    BrHalf(X(3),1,mV5000,3,Vx1,1,2500,True,2000,250,1,0)                'etc...
+    BrHalf(X(4),1,mV5000,4,Vx1,1,2500,True,2000,250,1,0)
+    BrHalf(X(5),1,mV5000,5,Vx1,1,2500,True,2000,250,1,0)
+    BrHalf(X(6),1,mV5000,6,Vx1,1,2500,True,2000,250,1,0)
+    BrHalf(X(7),1,mV5000,7,Vx1,1,2500,True,2000,250,1,0)
+    BrHalf(X(8),1,mV5000,8,Vx1,1,2500,True,2000,250,1,0)
+    BrHalf(X(9),1,mV5000,9,Vx3,1,2500,True,2000,250,1,0)              'Same as above except thermistor 9 (X9) onwards powered by excitation channel 3 (Vx3)
+    BrHalf(X(10),1,mV5000,10,Vx3,1,2500,True,2000,250,1,0)
+    BrHalf(X(11),1,mV5000,11,Vx3,1,2500,True,2000,250,1,0)
+    BrHalf(X(12),1,mV5000,12,Vx3,1,2500,True,2000,250,1,0)
+    BrHalf(X(13),1,mV5000,13,Vx3,1,2500,True,2000,250,1,0)
+    BrHalf(X(14),1,mV5000,14,Vx3,1,2500,True,2000,250,1,0)
+    BrHalf(X(15),1,mV5000,15,Vx3,1,2500,True,2000,250,1,0)
+
+    'Calculate temperature for each thermistor and save as T(I)
+    For I= 1 To 15                                                          'BH: The programme cannot be wrong here so this should be I = 1 - 15 (unless the wiring is incorrect).
+
+      Rt(I) = Rf(I) * (X(I) / (1 - (X(I))))                           'Calculate thermistor resistance (Rt(I) from 1/2 bridge equation with Rf(I) and X(I) as inputs
+      T(I) = (1 / (A + B*LOG(Rt(I)) + C*(LOG(Rt(I)))^3))-D(I)-273.15   'Convert Rt(I) to calibrated temperature (T(I)) via Steinhart and Hart, ice bath calibration offset (D(I)), and from K to deg C
+    Next
+
+    'Call Data Table and store data
+    CallTable Half_Hourly
+    CallTable Card_1_Min
+
+    If TimeIntoInterval(1, 30, Min) Then '@@@@@@"                                        'If 0 (0) sec (sec) into interval of 30 mis (30) (min), then
+      RawString = RawString & Half_Hourly.TIMESTAMP & ","                            'Read existing rawstring (should be empty) and append 'Timestamp'
+      'from Table 'Half_Hourly' (Half_Hourly.), and add a comma
+      'RawString = RawString & Half_Hourly.RECORD & ","                               'As above but append 'Record'
+      RawString = RawString & FormatFloat(Half_Hourly.Batt_volt_Avg, "%.1f") & ","    'As above but append CR1000x logger battery voltage (Batt_volt_min) (BH: Batt_volt_min is undefined no?)
+      'in Floating point precision to 2 decimal places ("%.2f")
+      RawString = RawString & FormatFloat(Half_Hourly.PTemp_Avg, "%.1f") & ","            'As above but append CR1000x wiring panel temperature (PTemp)
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(1), "%.4f") & ","              'As above but append thermistor 1 1/2 bridge ratio (X(1))
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(2), "%.4f") & ","              ' etc
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(3), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(4), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(5), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(6), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(7), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(8), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(9), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(10), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(11), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(12), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(13), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(14), "%.4f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.X_Avg(15), "%.4f") & ";"
+    EndIf
+
+     '--- Initial Turn ON the port one minutes prior to the transmission attempt for stability ---
+    If (TimeIntoInterval(659, 1440, Min)) AND (Batt_volt > 11.8) Then '@ 'Every 24 Hrs at 10:59 (before 3 Min of transmission)
+      PortSet(C1, 1)
+      MiniStatus = True
+    EndIf
+
+    '--- Main Data transmission ---
+    If TimeIntoInterval(662, 1440, Min) Then '@  'Every 24 Hrs at 11:02
+      DataString = RawString & DataString        'Prepare main data string for transmission
+      SendFail = True
+      RawString = ""                             'Clear raw string
+      MessageID  = ""                            'Clear message ID
+      MessageString  = ""                        'Clear message string
+
+      'If battery voltage is sufficient, send data
+      If  Batt_volt > 11.8
+        Call SendDataString()                    'Call Subroutine for Send data
+
+        Delay(1, 1, Min)
+        Call CheckStatus()                       'Call Subroutine for staus check data send or not
+
+        If ReplyStringState = "5" Then
+          Call MiniSleep()                       'Call Subroutine for Port Off
+        EndIf
+      EndIf
+    EndIf
+
+    '--- Turn port ON before 3 Min ---
+    If (TimeIntoInterval(59, 60, Min)) AND (SendFail = True) Then '@ Turn port ON before 3 Min of transmission try (eg 11:59, 12:59 & 13:59)
+      PortSet(C1, 1)
+      MiniStatus = True
+    EndIf
+
+    '--- Retry attempts to send data if previous attempts fail ---
+    If TimeIntoInterval(722, 1440, Min) AND (SendFail = True) AND (Batt_volt > 11.8) Then     '@ Handle retry at 12:02
+      Call HandleRetryAttempt()
+
+    ElseIf TimeIntoInterval(782, 1440, Min) AND (SendFail = True) AND (Batt_volt > 11.8) Then '@ Handle retry at 13:02
+      Call HandleRetryAttempt()
+
+    ElseIf TimeIntoInterval(842, 1440, Min) AND (SendFail = True) AND (Batt_volt > 11.8) Then '@ Handle retry at 14:02
+      Call HandleRetryAttempt()
+    EndIf
+
+    '    CR1000 OS 32
+    '    If TimeIsBetween(12, 15, 24, Hr) AND (SendFail = True) AND (BattV > 11.8)
+    '      If TimeIntoInterval(2, 60, Min) Then '@ Handle retry at 12:02,13:02 & 14:02
+    '        Call HandleRetryAttempt()
+    '      EndIf
+    '    EndIf
+
+    '--- Turn port OFF after 10 Min ---
+    If (TimeIntoInterval(20, 60, Min)) AND (SendFail = True) Then '@ Turn port OFF after 18 Min of transmission try (eg 11:20, 12:20, 13:20 & 14:20)
+      Call CheckStatus()              'Call Subroutine for staus check data send or not
+      If ReplyStringState = "5" Then
+        Call MiniSleep()
+      EndIf
+      
+      PortSet(C1, 0)
+      MiniStatus = False
+    EndIf
+
+    '--- Forces turn OFF the port at 14:30 or if battery low ---
+    If (TimeIntoInterval(870, 1440, Min)) OR (Batt_volt < 11.5) Then '@ 14:30
+      Call CheckStatus()              'Call Subroutine for staus check data send or not
+      If ReplyStringState = "5" Then
+        DataString = ""               'Clear DataString once send successfful
+      EndIf
+      PortSet(C1, 0)
+      MiniStatus = False
+      SendFail = False
+    EndIf
+
+  NextScan
+EndProg

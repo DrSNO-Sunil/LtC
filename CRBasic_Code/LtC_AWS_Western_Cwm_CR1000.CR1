@@ -1,0 +1,408 @@
+'CR1000 Series Datalogger
+'LtC AWS WesternCwm CR1000
+
+'Declare data storage strings for communication, parsing and handling
+Public DataString As String *25000 'String limit based on the available memory size in the logger
+Public RawString As String *25000  'String limit based on the available memory size in the logger
+
+Public ReadyString As String *200
+Public ResponseString As String *200
+Public MessageString As String *200
+Public ReplyString As String *200
+Public MessageID As String *100
+Public ReplyStringState As String *100
+Public ReadyCheck As String *100
+Public CancelCheck As String *100
+Public CancelMessage As String *100
+
+'Declare variables for string parsing and timing as integer
+Public SecondDel, FirstDel As Long
+
+'Declare vcariables for flags
+Public MiniStatus As Boolean
+Public SendFail As Boolean
+
+'Declare battery voltage
+Public BattV
+
+'Temperature and Relative Humidity variables
+Public TRHData(2)
+
+Alias TRHData(1) = AirTC
+Alias TRHData(2) = RH
+
+'Snow Depth variables
+Public SnowVUE(2)
+Public SV_TCDT
+
+Public SnowVueFlag As Boolean
+Dim rawdist(12)
+Public SnowVueCount
+Dim cordist(12)
+Dim SnowVueSortRaw(12) As Float
+Dim SnowVueSortCor(12) As Float
+Public SnowDepth
+Public cor_distance_median
+
+Alias SnowVUE(1) = SV_DT
+Alias SnowVUE(2) = SV_Q
+
+'Incoming shortwave radiation variables
+Public SWin
+
+'Incoming longwave radiation variables
+Public Pyrg_mV_in
+Public Pyrg_SBTemp_C_in
+Public Rt_in
+Public ST_Rat_in
+Public LWin
+
+'Outgoing longwave radiation variables
+Public Pyrg_mV_out
+Public Pyrg_SBTemp_C_out
+Public Rt_out
+Public ST_Rat_out
+Public LWout
+
+'Declare Units
+Units BattV = Volts
+Units AirTC = Deg C
+Units RH = %
+Units SWin = umol/s/m^2
+Units LWin = W/m^2
+Units LWout = W/m^2
+
+'''''''''''''''''''''''''''''''''''''''''''''
+'Apogee Pyrgeometer Thermistor Coefficients
+Const A_Below0 = 0.000932960
+Const B_Below0 = 0.000221424
+Const C_Below0 = 0.000000126329
+
+Const A_Above0 = 0.000932794
+Const B_Above0 = 0.000221451
+Const C_Above0 = 0.000000126233
+
+'Stefan-Boltzmann constant
+Const Sigma = 0.000000056704
+
+'Sensor specific calibration coefficients
+Const Pyrg_k1_in = 8.757
+Const Pyrg_k2_in = 1.036
+
+Const Pyrg_k1_out = 9.201
+Const Pyrg_k2_out = 1.021
+''''''''''''''''''''''''''''''''''''''''''''
+
+'Define Data Tables
+DataTable(Half_Hourly,True,-1)
+  DataInterval(0,30,Min,10) '@
+  'Average(1,BattV,FP2,False)
+  Minimum(1,BattV,FP2,False,False)
+  'Tair
+  Average(1,AirTC,FP2,False)
+  Minimum(1,AirTC,FP2,False,False)
+  Maximum(1,AirTC,FP2,False,False)
+  'RH
+  Sample(1,RH,FP2)
+  Minimum(1,RH,FP2,False,False)
+  Maximum(1,RH,FP2,False,False)
+  'SnowVUE
+  Sample(1,SnowDepth,FP2)
+  'SWin
+  Average(1,SWin,IEEE4,False)
+  Minimum(1,SWin,IEEE4,False,False)
+  Maximum(1,SWin,IEEE4,False,False)
+  'LWin
+  Average(1,LWin,FP2,False)
+  Minimum(1,LWin,FP2,False,False)
+  Maximum(1,LWin,FP2,False,False)
+  'LWout
+  Average(1,LWout,FP2,False)
+  Minimum(1,LWout,FP2,False,False)
+  Maximum(1,LWout,FP2,False,False)
+EndTable
+
+'--- Subroutines ---
+'Subroutine to send data
+Sub SendDataString()
+  PortSet(1, 1)      'Port ON
+  MiniStatus = True
+  SerialFlush(COM2) 'Clear any characters in the serial input buffer
+
+  ReadyString = "AT+IMTWU=" & Len(DataString) & CHR(13) & CHR(10) 'Prepare AT command for sending binary data of length DataString
+
+  Delay(1, 500, mSec)
+  SerialOut(COM2, ReadyString, "", 0, 0) 'Check if Mini is ready to recive binary data
+
+  ReadyCheck = ""
+  Delay(1, 500, mSec)
+  SerialIn(ReadyCheck, COM2, 3000, "", 1000) 'Read response for ReadyCheck
+
+  Delay(1, 500, mSec)
+  SerialOut(COM2, DataString, "", 0, 0) 'Send main data
+
+  'clear variables
+  ResponseString = ""
+  MessageID = ""
+  MessageString = ""
+
+  'read messageid string
+  Delay(1, 500, mSec)
+  SerialIn(ResponseString, COM2, 100, "", 1000) 'Read response for ResponseString
+
+  'Parse message ID from response string (example ResponseString = "+IMTWU: 12 OK" so MessageID = 12)
+  FirstDel = InStr(1, ResponseString, " ", 2)+1
+  If FirstDel = Len(ResponseString)+1 OR NOT(Mid(ResponseString,FirstDel,1) >= CHR(48) AND Mid(ResponseString,FirstDel,1) <= CHR(57)) Then
+    FirstDel = 1
+  EndIf
+  SecondDel = InStr(FirstDel, ResponseString, "O", 2)
+  If SecondDel = 0 Then
+    SecondDel = Len(ResponseString)+1
+  EndIf
+
+  'Extract message ID
+  MessageID = Mid(ResponseString, FirstDel, ABS(SecondDel-FirstDel))
+
+  'Prepare messagestring for tracking the message state
+  MessageString = "AT+IMTMOS=" & MessageID & CHR(13)& CHR(10)
+EndSub
+
+'Subroutine to check communication status
+Sub CheckStatus()
+  PortSet(1, 1) 'Port ON
+  MiniStatus = True
+  'clear variables
+  ReplyString = ""
+  ReplyStringState = ""
+
+  SerialFlush(COM2)
+  Delay(1, 500, mSec)
+
+  'send messagestring to get message status
+  SerialOut(COM2, MessageString, "", 0, 0)
+
+  'read status string
+  Delay(1, 500, mSec)
+  SerialIn(ReplyString, COM2, 100, "", 1000)
+
+  'Parse reply for the status string (example ReplyString = "+IMTMOS: 244, 5, 0, OK" so ReplyStringState = 5)
+  FirstDel = InStr(1, ReplyString, ",", 2)+1
+  If FirstDel = Len(ReplyString)+1 OR NOT(Mid(ReplyString,FirstDel+1,1) = "," OR Mid(ReplyString,FirstDel+1,1) = "") Then
+    FirstDel = 1
+  EndIf
+  SecondDel = InStr(FirstDel, ReplyString, ",", 2)
+  If SecondDel = 0 Then
+    SecondDel = Len(ReplyString)+1
+  EndIf
+
+  'Extract reply state
+  ReplyStringState = Mid(ReplyString, FirstDel, ABS(SecondDel-FirstDel))
+EndSub
+
+'Subroutine to turn OFF the port
+Sub MiniSleep()
+  PortSet(1, 0) 'Port OFF
+  MiniStatus = False
+  SendFail = False
+  DataString = "" 'Clear DataString once send successfful
+EndSub
+
+'Subroutine to retry if Send fail
+Sub HandleRetryAttempt()
+  Call CheckStatus()                                           'Call Subroutine for staus check data send or not
+  If ReplyStringState = "5" Then
+    Call MiniSleep()                                           'Call Subroutine for Port OFF
+  Else
+    SerialFlush(COM2)
+
+    CancelMessage = "AT+IMTC3=" & MessageID & CHR(13) & CHR(10) 'Cancel MO - A message sent from the device to the Iridium network
+    SerialOut(COM2, CancelMessage, "", 0, 0)
+
+    Delay(1, 500, mSec)
+    SerialIn(CancelCheck, COM2, 3000, "", 1000)                 'Read response
+
+    Call SendDataString()                                       'Call Subroutine for Send data
+
+    Delay(1, 1, Min)
+    Call CheckStatus()                                          'Call Subroutine for staus check data send or not
+    If ReplyStringState = "5" Then
+      Call MiniSleep()                                          'Call Subroutine for Port OFF
+    EndIf
+  EndIf
+EndSub
+'--- End Subroutines ---
+
+'Main Program
+BeginProg
+
+  SnowVueCount = 1
+
+  'Configure COMPort 2 for sending data
+  SerialOpen(COM2, 115200,0,0,512)
+
+  'Main Scan
+  Scan(10,Sec,0,0) '@
+    'Default CR1000 Datalogger Battery Voltage measurement 'BattV'
+    Battery(BattV)
+
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    'HygroVUE10 Digital Temperature & Relative Humidity Sensor measurements 'AirTC' and 'RH'
+    SDI12Recorder(TRHData(),5,"0","M!",1,0)
+
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    ' SnowVUE (distance to target).
+    If TimeIntoInterval(15,30,min) Then SnowVueFlag = TRUE
+    If SnowVueFlag = True Then
+      SDI12Recorder(SnowVUE(),7,"0","M1!",1,0)
+      SV_DT = SV_DT*100
+      SV_TCDT = SV_DT*SQR((AirTC+273.15)/273.15)
+      rawdist(SnowVueCount) = SV_DT
+      cordist(SnowVueCount) = SV_TCDT
+      SnowVueCount = SnowVueCount + 1
+      If SnowVueCount = 12 Then
+        ' Sort the values
+        SortSpa(SnowVueSortRaw(),11,rawdist())
+        SortSpa(SnowVueSortCor(),11,cordist())
+        ' Take the median
+        SnowDepth = SnowVueSortRaw(6)
+        cor_distance_median = SnowVueSortCor(6)
+        SnowVueFlag = False
+        SnowVueCount = 1
+      EndIf
+    EndIf
+
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    'CS310 Quantum Sensor measurements 'PAR_Tot' and 'SWin
+    VoltDiff(SWin,1,AutoRange,1,False,0,_60Hz,1,0)
+    If SWin < 0 Then SWin = 0
+    'Calculate flux density
+    SWin = SWin * 100
+
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    'Measure incoming longwave radiation on a differential channel
+    VoltDiff(Pyrg_mV_in, 1, AutoRange, 3, True, 0, _60Hz, 1.0, 0)
+    'Measure sensor body temperature using half bridge measurement
+    BrHalf(ST_Rat_in, 1, mV2500, 7, Vx1, 1, 2500, True, 0, _60Hz, 1, 0)
+    'Calculate resistance of pyrgeometer thermistor
+    Rt_in = 24900 * (ST_Rat_in / (1 - ST_Rat_in))
+    'Use appropriate thermistor coefficients depending on calculated resistance
+    If Rt_in > 94980 Then
+      Pyrg_SBTemp_C_in = (1 / (A_Below0 + (B_Below0 * LN(Rt_in)) + (C_Below0 * (LN(Rt_in))^3))) - 273.15
+    Else
+      Pyrg_SBTemp_C_in = (1 / (A_Above0 + (B_Above0 * LN(Rt_in)) + (C_Above0 * (LN(Rt_in))^3))) - 273.15
+    EndIf
+    'Calculate emitted longwave radiation in units of W m-2
+    LWin = Pyrg_k1_in * Pyrg_mV_in + Pyrg_k2_in * Sigma * (Pyrg_SBTemp_C_in + 273.15) ^ 4
+
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+    'Measure outgoing longwave radiation on a differential channel
+    VoltDiff(Pyrg_mV_out, 1, AutoRange, 5, True, 0, _60Hz, 1.0, 0)
+    BrHalf(ST_Rat_out, 1, mV2500, 11, Vx2, 1, 2500, True, 0, _60Hz, 1, 0)
+    Rt_out = 24900 * (ST_Rat_out / (1 - ST_Rat_out))
+    If Rt_out > 94980 Then
+      Pyrg_SBTemp_C_out = (1 / (A_Below0 + (B_Below0 * LN(Rt_out)) + (C_Below0 * (LN(Rt_out))^3))) - 273.15
+    Else
+      Pyrg_SBTemp_C_out = (1 / (A_Above0 + (B_Above0 * LN(Rt_out)) + (C_Above0 * (LN(Rt_out))^3))) - 273.15
+    EndIf
+    LWout = Pyrg_k1_out * Pyrg_mV_out + Pyrg_k2_out * Sigma * (Pyrg_SBTemp_C_out + 273.15) ^ 4
+    ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+    'Call Data Tables and Store Data
+    CallTable Half_Hourly
+
+    '--- Format the data string for transmission every 30 minutes from Half_Hourly table ---
+    If TimeIntoInterval(1, 30, Min) Then '@
+      'TIMESTAMP
+      RawString = RawString & Half_Hourly.TIMESTAMP & ","
+      'BattV
+      'RawString = RawString & FormatFloat(Half_Hourly.BattV_Avg, "%.2f") & ","
+      RawString = RawString & FormatFloat(Half_Hourly.BattV_Min, "%.2f") & ","
+      'Tair
+      RawString = RawString & FormatFloat(Half_Hourly.AirTC_Avg, "%.2f") & "," & FormatFloat(Half_Hourly.AirTC_Min, "%.2f") & "," & FormatFloat(Half_Hourly.AirTC_Max, "%.2f") & ","
+      'RH
+      RawString = RawString & FormatFloat(Half_Hourly.RH, "%.2f") & "," & FormatFloat(Half_Hourly.RH_Min, "%.2f") & "," & FormatFloat(Half_Hourly.RH_Max, "%.2f") & ","
+      'Snow Depth
+      RawString = RawString & FormatFloat(Half_Hourly.SnowDepth, "%.2f") & ","
+      'SWin
+      RawString = RawString & FormatFloat(Half_Hourly.SWin_Avg, "%.2f") & "," & FormatFloat(Half_Hourly.SWin_Min, "%.2f") & "," & FormatFloat(Half_Hourly.SWin_Max, "%.2f") & ","
+      'LWin
+      RawString = RawString & FormatFloat(Half_Hourly.LWin_Avg, "%.2f") & "," & FormatFloat(Half_Hourly.LWin_Min, "%.2f") & "," & FormatFloat(Half_Hourly.LWin_Max, "%.2f") & ","
+      'LWout
+      RawString = RawString & FormatFloat(Half_Hourly.LWout_Avg, "%.2f") & "," & FormatFloat(Half_Hourly.LWout_Min, "%.2f") & "," & FormatFloat(Half_Hourly.LWout_Max, "%.2f") & ";"
+    EndIf
+
+    '--- Initial Turn ON the port three minutes prior to the transmission attempt for stability ---
+    If (TimeIntoInterval(659, 1440, Min)) AND (BattV > 11.8) Then '@ 'Every 24 Hrs at 10:59 (before 3 Min of transmission)
+      PortSet(1, 1)
+      MiniStatus = True
+    EndIf
+
+    '--- Main Data transmission ---
+    If TimeIntoInterval(662, 1440, Min) Then '@  'Every 24 Hrs at 11:02
+      DataString = RawString & DataString        'Prepare main data string for transmission
+      SendFail = True
+      RawString = ""                             'Clear raw string
+      MessageID  = ""                            'Clear message ID
+      MessageString  = ""                        'Clear message string
+
+      'If battery voltage is sufficient, send data
+      If  BattV > 11.8
+        Call SendDataString()                    'Call Subroutine for Send data
+
+        Delay(1, 1, Min)
+        Call CheckStatus()                       'Call Subroutine for staus check data send or not
+
+        If ReplyStringState = "5" Then
+          Call MiniSleep()                       'Call Subroutine for Port OFF
+        EndIf
+      EndIf
+    EndIf
+
+    '--- Turn port ON before 3 Min ---
+    If (TimeIntoInterval(59, 60, Min)) AND (SendFail = True) Then '@ Turn port ON before 3 Min of transmission try (eg 11:59, 12:59 & 13:59)
+      PortSet(1, 1)
+      MiniStatus = True
+    EndIf
+
+    '--- Retry attempts to send data if previous attempts fail ---
+    If TimeIntoInterval(722, 1440, Min) AND (SendFail = True) AND (BattV > 11.8) Then     '@ Handle retry at 12:02
+      Call HandleRetryAttempt()
+
+    ElseIf TimeIntoInterval(782, 1440, Min) AND (SendFail = True) AND (BattV > 11.8) Then '@ Handle retry at 13:02
+      Call HandleRetryAttempt()
+
+    ElseIf TimeIntoInterval(842, 1440, Min) AND (SendFail = True) AND (BattV > 11.8) Then '@ Handle retry at 14:02
+      Call HandleRetryAttempt()
+    EndIf
+
+    '    CR1000 OS 32
+    '    If TimeIsBetween(12, 15, 24, Hr) AND (SendFail = True) AND (BattV > 11.8)
+    '      If TimeIntoInterval(2, 60, Min) Then '@ Handle retry at 12:02,13:02 & 14:02
+    '        Call HandleRetryAttempt()
+    '      EndIf
+    '    EndIf
+
+    '--- Turn port OFF after 18 Min ---
+    If (TimeIntoInterval(20, 60, Min)) AND (SendFail = True) Then '@ Turn port OFF after 18 Min of transmission try (eg 11:20, 12:20, 13:20 & 14:20)
+      Call CheckStatus()              'Call Subroutine for staus check data send or not
+      If ReplyStringState = "5" Then
+        Call MiniSleep()
+      EndIf
+      
+      PortSet(1, 0)
+      MiniStatus = False
+    EndIf
+
+    '--- Force turn OFF the port at 14:30 or if battery low ---
+    If (TimeIntoInterval(870, 1440, Min)) OR (BattV < 11.5) Then '@ 14:30
+      Call CheckStatus()              'Call Subroutine for staus check data send or not
+      If ReplyStringState = "5" Then
+        DataString = ""               'Clear DataString once send successfful
+      EndIf
+      PortSet(1, 0)
+      MiniStatus = False
+      SendFail = False
+    EndIf
+
+  NextScan
+EndProg
