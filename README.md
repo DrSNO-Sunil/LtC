@@ -8,3 +8,4 @@
 Reference
 ---
 Design and implementation of a robust data logging and satellite telemetry system for remote research
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16985625.svg)](https://doi.org/10.5281/zenodo.16985625)
