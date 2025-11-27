@@ -7,5 +7,5 @@
 ---
 Reference
 ---
-Design and implementation of a robust data logging and satellite telemetry system for remote research
+Oulkar, S. N., Peacey, M. W., Mitrev, M., Quincey, D. J., Hubbard, B., Matthews, T., Oulkar, A. S., Miles, K. E., and Rowan, A. V.: Design and implementation of a robust data logging and satellite telemetry system for remote research, EGUsphere [preprint], https://doi.org/10.5194/egusphere-2025-4346, 2025.
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.16985625.svg)](https://doi.org/10.5281/zenodo.16985625)
